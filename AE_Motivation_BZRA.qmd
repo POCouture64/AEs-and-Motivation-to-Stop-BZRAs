@@ -26,14 +26,14 @@ View(SIMOA)
 ## Eligible Participants
 
 ```{r}
-#| label: Inclusion/Exclusion Criteria
+#| label: Eligible Participants
 ######
-# This section of the code will ensure participants are 65+ and have taken a BZRA for sleep rather than another medication. I also show how many people I lose at each stage of the process to be able to report these later and make the code more ytransparent especially if it needs to be provided ot reviewers/ the journal.
+# Apply inclusion criteria:
+#  - Age >= 65 or age_cat = 1
+#  - Took at least one of the 14 BZRAs
+#  - Provided an answer for scrn_stopped_bzra
 ######
 
-library(tidyverse)  
-
-# Original count
 n_original <- nrow(SIMOA)
 
 # After age filtering
@@ -41,20 +41,524 @@ SIMOA_age_filtered <- SIMOA %>%
   filter(age_cat == 1 | (age_cat == 0 & age >= 65))
 n_after_age <- nrow(SIMOA_age_filtered)
 
-# After both filters
-SIMOA <- SIMOA_age_filtered %>%
+# After BZRA filtering
+SIMOA_bzra_filtered <- SIMOA_age_filtered %>%
   filter(rowSums(select(., starts_with("c_sp___"))[, 1:14] == 1, na.rm = TRUE) > 0)
+n_after_bzra <- nrow(SIMOA_bzra_filtered)
+
+# After outcome filtering
+SIMOA <- SIMOA_bzra_filtered %>%
+  filter(!is.na(scrn_stopped_bzra))
 n_final <- nrow(SIMOA)
 
 # Report results
 cat("Original sample:", n_original, "\n")
 cat("After age filtering:", n_after_age, "(removed:", n_original - n_after_age, ")\n")
-cat("After c_sp filtering:", n_final, "(removed:", n_after_age - n_final, ")\n")
+cat("After BZRA filtering:", n_after_bzra, "(removed:", n_after_age - n_after_bzra, ")\n")
+cat("After scrn_stopped_bzra filtering:", n_final, "(removed:", n_after_bzra - n_final, ")\n")
 cat("Total removed:", n_original - n_final, "\n")
-
 ```
 
 
-## 
+## Combining AE/Motivation variables For Current & Past Users
+
+```{r}
+#| label: Combine AE and Motivation Variables
+######
+# Combine v1 and v2 versions into single variables
+# AE = adverse effects, safety, ADLs, dependence
+# Motivation = discouragement, failure, regret (Likert 1–5)
+######
+
+# Adverse effect pairs
+adverse_var_pairs <- list(
+  side_effects_1_combined = c("side_effects_1", "side_effects_1_v2"),
+  side_effects_2_combined = c("side_effects_2", "side_effects_2_v2"),
+  side_effects_3_combined = c("side_effects_3", "side_effects_3_v2"),
+  side_effects_4_combined = c("side_effects_4", "side_effects_4_v2"),
+  safety_1_combined       = c("safety_1", "safety_1_v2"),
+  safety_2_combined       = c("safety_2", "safety_2_v2"),
+  safety_3_combined       = c("safety_3", "safety_3_v2"),
+  safety_4_combined       = c("safety_4", "safety_4_v2"),
+  adls_1_combined         = c("adls_1", "adls_1_v2"),
+  adls_2_combined         = c("adls_2", "adls_2_v2"),
+  dependence_1_combined   = c("dependence_1", "dependence_1_v2"),
+  dependence_2_combined   = c("dependence_2", "dependence_2_v2"),
+  dependence_3_combined   = c("dependence_3", "dependence_3_v2")
+)
+
+for (newvar in names(adverse_var_pairs)) {
+  vars <- adverse_var_pairs[[newvar]]
+  SIMOA[[newvar]] <- apply(SIMOA[, vars], 1, function(x) {
+    if (all(is.na(x))) {
+      return(NA)
+    } else {
+      return(max(x, na.rm = TRUE))  # binary
+    }
+  })
+}
+
+# Motivation pairs
+motivation_var_pairs <- list(
+  motivation_1_combined = c("motivation_1", "motivation_1_v2"),
+  motivation_2_combined = c("motivation_2", "motivation_2_v2"),
+  motivation_3_combined = c("motivation_3", "motivation_3_v2")
+)
+
+for (newvar in names(motivation_var_pairs)) {
+  vars <- motivation_var_pairs[[newvar]]
+  SIMOA[[newvar]] <- apply(SIMOA[, vars], 1, function(x) {
+    if (all(is.na(x))) {
+      return(NA)
+    } else {
+      return(mean(x, na.rm = TRUE))  # Likert 1–5
+    }
+  })
+}
+```
+
+
+## Recode General Health
+
+```{r}
+#| label: Recode General Health
+######
+# Collapse gen_health___1–5 into a single ordered factor
+######
+
+# Make sure the columns exist
+gen_health_cols <- grep("^gen_health___", names(SIMOA), value = TRUE)
+
+if (length(gen_health_cols) > 0) {
+  SIMOA$gen_health <- apply(SIMOA[, gen_health_cols], 1, function(x) {
+    if (all(is.na(x))) {
+      return(NA)
+    } else {
+      return(which(x == 1))  # position of checked box
+    }
+  })
+  
+  SIMOA$gen_health <- factor(SIMOA$gen_health,
+                             levels = 1:5,
+                             labels = c("Poor", "Fair", "Good", "Very good", "Excellent"),
+                             ordered = TRUE)
+}
+```
+
+
+```{r}
+#| label: Debug Health Condition Variables
+######
+# Debug health condition variables to understand the data structure
+######
+
+library(dplyr)
+
+cat("=== DEBUGGING HEALTH CONDITION VARIABLES ===\n")
+
+# Check for individual count variables that might already exist
+expected_count_vars <- c("n_sleep_con", "n_phys_con", "n_mental_con")
+existing_count_vars <- expected_count_vars[expected_count_vars %in% names(analysis_data)]
+
+cat("Expected count variables found:", length(existing_count_vars), "of", length(expected_count_vars), "\n")
+if (length(existing_count_vars) > 0) {
+  cat("Found:", paste(existing_count_vars, collapse = ", "), "\n")
+  
+  # Show summary of these variables
+  for (var in existing_count_vars) {
+    cat("\nVariable:", var, "\n")
+    cat("  Range:", min(analysis_data[[var]], na.rm = TRUE), "to", 
+        max(analysis_data[[var]], na.rm = TRUE), "\n")
+    cat("  Missing values:", sum(is.na(analysis_data[[var]])), 
+        "(", round(sum(is.na(analysis_data[[var]]))/nrow(analysis_data)*100, 1), "%)\n")
+    cat("  Mean:", round(mean(analysis_data[[var]], na.rm = TRUE), 2), "\n")
+  }
+} else {
+  cat("None of the expected count variables found\n")
+}
+
+# Check for checkbox variables with different patterns
+cat("\n=== CHECKING FOR CHECKBOX VARIABLES ===\n")
+
+# Look for any variables containing health condition patterns
+health_patterns <- c("sleep_health", "phys_health", "ment_health", "mental_health", 
+                     "sleep_con", "phys_con", "ment_con", "mental_con")
+
+found_patterns <- list()
+for (pattern in health_patterns) {
+  matching_vars <- names(analysis_data)[grepl(pattern, names(analysis_data), ignore.case = TRUE)]
+  if (length(matching_vars) > 0) {
+    found_patterns[[pattern]] <- matching_vars
+    cat("Pattern '", pattern, "' found in ", length(matching_vars), " variables:\n", sep = "")
+    cat("  ", paste(matching_vars, collapse = ", "), "\n")
+  }
+}
+
+if (length(found_patterns) == 0) {
+  cat("No health condition patterns found\n")
+  cat("Looking for any variables containing 'health' or 'condition':\n")
+  health_vars <- names(analysis_data)[grepl("health|condition", names(analysis_data), ignore.case = TRUE)]
+  if (length(health_vars) > 0) {
+    cat("  ", paste(health_vars, collapse = ", "), "\n")
+  } else {
+    cat("  No variables containing 'health' or 'condition' found\n")
+  }
+}
+
+# Check if n_health_conditions exists and its status
+cat("\n=== CHECKING n_health_conditions ===\n")
+if ("n_health_conditions" %in% names(analysis_data)) {
+  cat("n_health_conditions exists in dataset\n")
+  cat("  Missing values:", sum(is.na(analysis_data$n_health_conditions)), 
+      "(", round(sum(is.na(analysis_data$n_health_conditions))/nrow(analysis_data)*100, 1), "%)\n")
+  
+  if (sum(!is.na(analysis_data$n_health_conditions)) > 0) {
+    cat("  Range:", min(analysis_data$n_health_conditions, na.rm = TRUE), "to", 
+        max(analysis_data$n_health_conditions, na.rm = TRUE), "\n")
+    cat("  Mean:", round(mean(analysis_data$n_health_conditions, na.rm = TRUE), 2), "\n")
+  }
+} else {
+  cat("n_health_conditions does not exist in dataset\n")
+}
+
+# Show first few variable names to understand naming pattern
+cat("\n=== DATASET STRUCTURE ===\n")
+cat("Total variables:", ncol(analysis_data), "\n")
+cat("Total observations:", nrow(analysis_data), "\n")
+cat("First 30 variable names:\n")
+var_names <- names(analysis_data)
+for (i in seq(1, min(30, length(var_names)), by = 10)) {
+  end_idx <- min(i + 9, length(var_names))
+  cat("  ", paste(var_names[i:end_idx], collapse = ", "), "\n")
+}
+
+cat("\n=== SUMMARY ===\n")
+if (length(existing_count_vars) == 3) {
+  cat("✓ All three count variables (n_sleep_con, n_phys_con, n_mental_con) found\n")
+  cat("✓ You can use these directly without creating n_health_conditions\n")
+} else if (length(existing_count_vars) > 0) {
+  cat("⚠ Partial count variables found:", paste(existing_count_vars, collapse = ", "), "\n")
+  cat("⚠ Missing:", paste(expected_count_vars[!expected_count_vars %in% existing_count_vars], collapse = ", "), "\n")
+} else {
+  cat("✗ No count variables found\n")
+  if (length(found_patterns) > 0) {
+    cat("✓ But checkbox variables found - can create count variables\n")
+  } else {
+    cat("✗ No checkbox variables found either\n")
+  }
+}
+```
+
+
+
+## MI Optimization
+
+```{r}
+#| label: MI Optimization
+######
+# Systematic optimization for multiple imputation:
+# - Create derived variables
+# - Determine number of imputations from missingness
+# - Pilot run to assess number of iterations
+######
+
+library(mice)
+library(dplyr)
+library(VIM)      # for missing data visualization
+
+# --- Handle Health Condition Variables ---
+cat("=== CHECKING FOR HEALTH CONDITION VARIABLES ===\n")
+
+# Define all possible health condition checkbox variables
+sleep_health_vars <- paste0("sleep_health_con___", c(0:3, 9))  # Include "None" for checking
+phys_health_vars <- paste0("phys_health_con___", c(0:22, 99))  # Include "None" for checking
+ment_health_vars <- paste0("ment_health_con___", c(0:6, 9))    # Include "None" for checking
+
+all_health_checkbox_vars <- c(sleep_health_vars, phys_health_vars, ment_health_vars)
+existing_health_checkbox_vars <- all_health_checkbox_vars[all_health_checkbox_vars %in% names(analysis_data)]
+
+cat("Found", length(existing_health_checkbox_vars), "health condition checkbox variables out of", 
+    length(all_health_checkbox_vars), "possible\n")
+
+if (length(existing_health_checkbox_vars) > 0) {
+  cat("Health condition variables found - will include in imputation:\n")
+  
+  # Separate by category for reporting
+  existing_sleep <- sleep_health_vars[sleep_health_vars %in% names(analysis_data)]
+  existing_phys <- phys_health_vars[phys_health_vars %in% names(analysis_data)]
+  existing_ment <- ment_health_vars[ment_health_vars %in% names(analysis_data)]
+  
+  if (length(existing_sleep) > 0) cat("  Sleep conditions:", length(existing_sleep), "variables\n")
+  if (length(existing_phys) > 0) cat("  Physical conditions:", length(existing_phys), "variables\n")
+  if (length(existing_ment) > 0) cat("  Mental conditions:", length(existing_ment), "variables\n")
+  
+} else {
+  cat("No health condition checkbox variables found in dataset\n")
+}
+
+# Check if individual count variables already exist
+expected_count_vars <- c("n_sleep_con", "n_phys_con", "n_mental_con")
+existing_count_vars <- expected_count_vars[expected_count_vars %in% names(analysis_data)]
+
+if (length(existing_count_vars) > 0) {
+  cat("Found count variables:", paste(existing_count_vars, collapse = ", "), "\n")
+  for (var in existing_count_vars) {
+    missing_pct <- round(sum(is.na(analysis_data[[var]]))/nrow(analysis_data)*100, 1)
+    cat("  ", var, "- Missing:", missing_pct, "%\n")
+  }
+}
+
+# Handle n_health_conditions
+if ("n_health_conditions" %in% names(analysis_data)) {
+  missing_pct <- round(sum(is.na(analysis_data$n_health_conditions))/nrow(analysis_data)*100, 1)
+  cat("n_health_conditions exists but is", missing_pct, "% missing\n")
+  
+  if (missing_pct >= 90) {
+    cat("Removing n_health_conditions from dataset (too much missing data)\n")
+    analysis_data$n_health_conditions <- NULL
+  } else {
+    cat("Keeping n_health_conditions for imputation\n")
+  }
+}
+
+# --- Missing Data Assessment ---
+cat("\n=== MISSING DATA ASSESSMENT ===\n")
+missing_summary <- analysis_data %>%
+  summarise_all(~sum(is.na(.))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "missing_count") %>%
+  mutate(
+    missing_percent = round((missing_count / nrow(analysis_data)) * 100, 2),
+    total_n = nrow(analysis_data)
+  ) %>%
+  arrange(desc(missing_percent))
+
+print(missing_summary)
+
+# Visualize missing data patterns
+if (any(missing_summary$missing_count > 0)) {
+  VIM::aggr(analysis_data, col = c('navyblue','red'), 
+            numbers = TRUE, sortVars = TRUE)
+}
+
+# --- Ensure correct data types ---
+# Binary variables
+binary_vars <- c("sex")
+analysis_data[binary_vars] <- lapply(analysis_data[binary_vars], factor)
+
+# Ordered categorical (Likert scales)
+ordered_vars <- c("education", "income", "gen_health",
+                  "side_effects_1_combined", "side_effects_2_combined",
+                  "side_effects_3_combined", "side_effects_4_combined",
+                  "motivation_1_combined", "motivation_2_combined", "motivation_3_combined")
+analysis_data[ordered_vars] <- lapply(analysis_data[ordered_vars], function(x) factor(x, ordered = TRUE))
+
+# Unordered categorical
+analysis_data$prov_terr <- factor(analysis_data$prov_terr)
+
+# Outcome variable (not imputed)
+analysis_data$scrn_stopped_bzra <- factor(analysis_data$scrn_stopped_bzra)
+
+# --- Create method vector ---
+meth <- make.method(analysis_data)
+
+# Continuous variables (exclude n_health_conditions if it was removed)
+continuous_vars <- c("age", "phq2_score", "med_quant", "osss_3_score")
+if ("n_health_conditions" %in% names(analysis_data)) {
+  continuous_vars <- c(continuous_vars, "n_health_conditions")
+}
+
+# Also include individual count variables if they exist
+if (length(existing_count_vars) > 0) {
+  continuous_vars <- c(continuous_vars, existing_count_vars)
+  cat("Added individual count variables to continuous variables\n")
+}
+
+meth[continuous_vars] <- "pmm"
+
+# Binary variables (including health condition checkboxes)
+binary_vars <- c("sex")
+if (length(existing_health_checkbox_vars) > 0) {
+  binary_vars <- c(binary_vars, existing_health_checkbox_vars)
+  cat("Added", length(existing_health_checkbox_vars), "health condition checkbox variables as binary\n")
+}
+meth[binary_vars] <- "logreg"
+
+# Outcome variable - do not impute
+meth["scrn_stopped_bzra"] <- ""
+
+# Ordered categorical
+meth[ordered_vars] <- "polr"
+
+# Unordered categorical
+meth["prov_terr"] <- "polyreg"
+
+cat("Imputation methods assigned:\n")
+cat("  PMM (continuous):", length(continuous_vars), "variables\n")
+cat("  Logistic regression (binary):", length(binary_vars), "variables\n")
+cat("  Proportional odds (ordered):", length(ordered_vars), "variables\n")
+cat("  Multinomial (unordered): 1 variable (prov_terr)\n")
+
+# --- Determine number of imputations based on missingness ---
+missing_frac <- colMeans(is.na(analysis_data))
+max_missing <- max(missing_frac)
+max_missing_var <- names(missing_frac)[which.max(missing_frac)]
+
+# Multiple rules for determining m
+m_white <- max(20, ceiling(max_missing * 100))  # White et al. rule
+m_graham <- ceiling(max_missing * 100)          # Graham et al. rule
+m_bodner <- max(10, ceiling(max_missing * 100 / 2))  # Bodner rule
+
+cat("\n=== DETERMINING NUMBER OF IMPUTATIONS ===\n")
+cat("Maximum missingness:", round(max_missing * 100, 2), "% in variable:", max_missing_var, "\n")
+cat("White et al. rule (≥20, ≥% missing):", m_white, "imputations\n")
+cat("Graham et al. rule (≥% missing):", m_graham, "imputations\n")
+cat("Bodner rule (≥10, ≥% missing/2):", m_bodner, "imputations\n")
+
+# Choose the most appropriate based on context
+m_suggested <- m_white  # Default to White et al.
+cat("Selected number of imputations:", m_suggested, "\n")
+
+# --- Pilot run to check convergence for iterations ---
+cat("\n=== PILOT RUN FOR CONVERGENCE ASSESSMENT ===\n")
+pilot_maxit <- 20
+pilot_m <- 5
+
+cat("Running pilot with m =", pilot_m, "and maxit =", pilot_maxit, "\n")
+
+set.seed(123)
+imp_pilot <- mice(analysis_data,
+                  m = pilot_m,
+                  maxit = pilot_maxit,
+                  method = meth,
+                  printFlag = FALSE)
+
+# --- Convergence Diagnostics ---
+cat("\n=== CONVERGENCE DIAGNOSTICS ===\n")
+
+# Visual convergence check
+plot(imp_pilot)
+
+# Check for potential convergence issues
+check_convergence <- function(imp_obj, threshold = 1.5) {
+  chains <- imp_obj$chainMean
+  vars_to_check <- names(chains)
+  
+  convergence_issues <- c()
+  
+  for (var in vars_to_check) {
+    if (!is.null(chains[[var]]) && ncol(chains[[var]]) > 1) {
+      # Simple variance-based convergence check
+      within_var <- apply(chains[[var]], 1, var, na.rm = TRUE)
+      between_var <- var(apply(chains[[var]], 2, mean, na.rm = TRUE), na.rm = TRUE)
+      
+      if (length(within_var) > 0 && !is.na(between_var) && between_var > 0) {
+        ratio <- max(within_var, na.rm = TRUE) / between_var
+        if (ratio > threshold) {
+          convergence_issues <- c(convergence_issues, var)
+        }
+      }
+    }
+  }
+  
+  return(convergence_issues)
+}
+
+conv_issues <- check_convergence(imp_pilot)
+if (length(conv_issues) > 0) {
+  cat("Potential convergence issues detected in:", paste(conv_issues, collapse = ", "), "\n")
+  cat("Consider increasing maxit or checking model specification\n")
+  suggested_maxit <- pilot_maxit * 2
+} else {
+  cat("Convergence appears satisfactory\n")
+  suggested_maxit <- pilot_maxit
+}
+
+# --- Final Recommendations ---
+cat("\n=== OPTIMIZATION RESULTS ===\n")
+cat("Recommended settings for final imputation:\n")
+cat("- Number of imputations (m):", m_suggested, "\n")
+cat("- Number of iterations (maxit):", suggested_maxit, "\n")
+cat("- Seed: 123 (for reproducibility)\n")
+cat("- Methods: pmm for continuous, logreg for binary, polr for ordered, polyreg for unordered\n")
+
+if (length(conv_issues) > 0) {
+  cat("\nWARNING: Convergence issues detected. Review plots and consider:\n")
+  cat("- Increasing iterations further\n")
+  cat("- Checking variable distributions\n")
+  cat("- Considering alternative imputation methods\n")
+}
+```
+
+
+## Descriptive Stats
+
+```{r}
+#| label: Descriptive Statistics
+######
+# Summarize demographics & key variables by scrn_stopped_bzra
+######
+
+library(dplyr)
+library(janitor)
+
+categorical_vars <- c("sex", "education", "income", "prov_terr", "gen_health")
+continuous_vars  <- c("age", "phq2_score", "n_health_conditions",
+                      "med_quant", "osss_3_score")
+
+for (var in categorical_vars) {
+  tab <- tabyl(SIMOA, !!sym(var), scrn_stopped_bzra) %>%
+    adorn_percentages("col") %>%
+    adorn_pct_formatting(digits = 1)
+  print(tab)
+}
+
+SIMOA %>%
+  group_by(scrn_stopped_bzra) %>%
+  summarise(across(all_of(continuous_vars), list(mean = mean, sd = sd), na.rm = TRUE))
+```
+
+
+## Bivariate Analysis
+
+```{r}
+#| label: Bivariate Analyses
+######
+# Chi-square and t-tests for unadjusted associations
+######
+
+for (var in categorical_vars) {
+  tbl <- table(SIMOA[[var]], SIMOA$scrn_stopped_bzra)
+  if (all(dim(tbl) > 1)) {
+    print(var)
+    print(chisq.test(tbl))
+  }
+}
+
+for (var in continuous_vars) {
+  print(var)
+  print(t.test(SIMOA[[var]] ~ SIMOA$scrn_stopped_bzra))
+}
+```
+
+
+## Logistic Regression
+
+```{r}
+#| label: Logistic Regression with Imputed Data
+######
+# Predictors of BZRA cessation
+######
+
+fit <- with(imp, glm(scrn_stopped_bzra ~ age + sex + education + income +
+                       phq2_score + n_health_conditions + med_quant + gen_health +
+                       side_effects_1_combined + side_effects_2_combined +
+                       dependence_1_combined +
+                       motivation_1_combined + motivation_2_combined + motivation_3_combined,
+                     family = binomial))
+
+pooled <- pool(fit)
+summary(pooled)
+```
+
 
 
