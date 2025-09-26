@@ -16,14 +16,45 @@ Loading int the SIMOA_Report dataset.
 ```{r}
 #| label: Loading The Data
 
+library(readr)
+
+SIMOA <- read_csv("SIMOA Report.csv")
+View(SIMOA)
 
 ```
 
-You can add options to executable code like this
+## Eligible Participants
 
 ```{r}
-#| echo: false
-2 * 2
+#| label: Inclusion/Exclusion Criteria
+######
+# This section of the code will ensure participants are 65+ and have taken a BZRA for sleep rather than another medication. I also show how many people I lose at each stage of the process to be able to report these later and make the code more ytransparent especially if it needs to be provided ot reviewers/ the journal.
+######
+
+library(tidyverse)  
+
+# Original count
+n_original <- nrow(SIMOA)
+
+# After age filtering
+SIMOA_age_filtered <- SIMOA %>%
+  filter(age_cat == 1 | (age_cat == 0 & age >= 65))
+n_after_age <- nrow(SIMOA_age_filtered)
+
+# After both filters
+SIMOA <- SIMOA_age_filtered %>%
+  filter(rowSums(select(., starts_with("c_sp___"))[, 1:14] == 1, na.rm = TRUE) > 0)
+n_final <- nrow(SIMOA)
+
+# Report results
+cat("Original sample:", n_original, "\n")
+cat("After age filtering:", n_after_age, "(removed:", n_original - n_after_age, ")\n")
+cat("After c_sp filtering:", n_final, "(removed:", n_after_age - n_final, ")\n")
+cat("Total removed:", n_original - n_final, "\n")
+
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+
+## 
+
+
