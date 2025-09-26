@@ -1,0 +1,29 @@
+---
+title: "AE & Motivation to Stop BZRAs"
+author: "PO Couture"
+format: html
+editor: visual
+---
+
+## AEs & Motivation to Stop BZRAs
+
+This is the code I will use for the publication about people 65+ and their reported adverse effects and their motivation to stop using or continue using BZRAs to see if any of these factors are important. Previous research has pointed to factors associated with LT use or success in cessation depending on the intervention but no study has been found simply describing if the experience of AEs and someones motivation to stop using BZRAs after LT use are associated.
+
+## Loading The Data
+
+Loading int the SIMOA_Report dataset.
+
+```{r}
+#| label: Loading The Data
+
+
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
